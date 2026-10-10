@@ -205,8 +205,7 @@ new world files.
 - `ui.py` — Gradio Blocks layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
-- `1. create world/` — notebook that generated the world (lesson L1)
-- `2. inventory/` — notebook the inventory mechanics are ported from (lesson L4)
+- `1. create world/` — notebook that generates new world JSON files (lesson L1)
 - `requirements.txt` — pinned to the lesson's original versions (see Install for the 3.13 fix)
 - `gameintro.png` — screenshot of the opening screen
 - `.venv/` — local virtualenv (gitignored)
