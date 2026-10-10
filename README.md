@@ -169,19 +169,64 @@ The inventory lives in `game_state` for the lifetime of the Python process.
 `Clear` in the UI resets history but not inventory; restart `game.py` to
 reset both.
 
+## Class and progression
+
+Three classes, selected at startup via the `CHARACTER_CLASS` env var:
+
+| Class | Icon | Flavor | Starting kit |
+|---|---|---|---|
+| Mage (default) | 🪄 | Arcane, French-named spells | 🧥 cloth robes, 📿 silver moon pendant, 📖 spellbook, 🪙 gold × 5 |
+| Warrior | ⚔️ | Martial, blunt tactics | 🧥 leather armor, ⚔️ shortsword, 🛡️ shield, 🪙 gold × 5 |
+| Healer | 🌿 | Restorative, herbcraft | 🧥 linen robes, 🎒 herb pouch, 📚 healing tome, 🪙 gold × 5 |
+
+```
+CHARACTER_CLASS=Warrior .venv/bin/python game.py
+```
+
+Each class carries a short line of GM steering (`CLASS_PROMPTS` in
+`progression.py`) that gets folded into `ACTION_SYSTEM_PROMPT` so the GM
+narrates each class in its own idiom.
+
+**XP** is awarded per turn by a JSON-mode LLM call (`detect_xp_gain` in
+`progression.py`). The judge reads the player's action and the GM's
+reply and returns `{"xpGained": N}` with a few-shot calibrated scale:
+
+- `0` for idle narration (looking around, chatting)
+- `1-5` for small wins (solved a puzzle, haggled a merchant)
+- `10-20` for defeating a foe or finishing a side quest beat
+- `30-50` for a boss or a major story milestone
+
+**Level** is pure Python. `apply_xp` adds the gain and checks
+`LEVEL_THRESHOLDS` (10, 25, 50, 100, 200, 400, 800). On a crossing, the
+summary line gets a `✨ Level up! N → N+1` banner, which the UI shows
+appended to the chatbot message:
+
+> Your blade finds its mark and the goblin falls.
+> Inventory: gold +2
+> XP +15 (total 15)
+> ✨ Level up! 1 → 2
+
+The right column of the UI shows the current class / level / XP header
+above the inventory and refreshes after each turn.
+
+**Persistence**: class/level/XP/inventory live in `game_state` for the
+process lifetime only. Restarting resets everything. Cross-session save
+is not wired up yet.
+
 ## Design: LLM reasons, code arbitrates
 
-The game uses three LLM calls per turn (`guard(input) + GM + guard(output) +
-inventory extract`), wrapped in deterministic Python that owns the state
-and the policy:
+The game uses five LLM calls per turn (`guard(input) + GM + guard(output) +
+inventory extract + XP judge`), wrapped in deterministic Python that owns
+the state and the policy:
 
 - **Prompts** steer the game master's narration. Free-form text out.
-- **JSON mode + few-shot** forces the inventory call to emit a structured
-  delta list instead of prose
-  (`[{"name": "sword", "change_amount": 1}, ...]`).
+- **JSON mode + few-shot** forces the inventory and XP calls to emit
+  structured deltas instead of prose
+  (`[{"name": "sword", "change_amount": 1}, ...]`, `{"xpGained": 15}`).
 - **Deterministic Python** does the state transitions. `update_inventory`
-  is dict math, `moderate` is a `frozenset` membership check,
-  `format_refusal` is string formatting. No LLM touches the state directly.
+  is dict math, `apply_xp` is a threshold table, `moderate` is a
+  `frozenset` membership check, `format_refusal` is string formatting.
+  No LLM touches the state directly.
 
 The determinism is only at the boundaries. The LLM can still hallucinate
 item names ("ancient relic" when the inventory shows "spellbook"),
@@ -208,10 +253,12 @@ All config is env vars with defaults:
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Game-master model tag Ollama has pulled |
 | `GUARD_MODEL` | `llama-guard3:1b` | Llama Guard model tag for moderation |
 | `INVENTORY_MODEL` | `qwen2.5:14b` | Model tag for the JSON inventory-delta extraction |
+| `PROGRESSION_MODEL` | `qwen2.5:14b` | Model tag for the JSON XP judge |
 | `WORLD_FILE` | `Lunevraie_L1.json` | World data file |
 | `KINGDOM_NAME` | `Éclairia` | Key under `world["kingdoms"]` |
 | `TOWN_NAME` | `Luciere` | Key under `kingdom["towns"]` |
 | `CHARACTER_NAME` | `Alaric Éclair` | Key under `town["npcs"]` |
+| `CHARACTER_CLASS` | `Mage` | `Mage` \| `Warrior` \| `Healer` |
 
 Swap character:
 
@@ -245,6 +292,7 @@ new world files.
 - `game.py` — entrypoint: config, chat client, prompts, game state, action loop, `main()`
 - `safety.py` — Llama Guard 3 moderation and refusal policy
 - `inventory.py` — starting inventory, item-change detection, inventory updates
+- `progression.py` — class presets, XP judge, level thresholds
 - `ui.py` — Gradio Blocks layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
