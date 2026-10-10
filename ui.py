@@ -24,6 +24,13 @@ Message = dict[str, str]
 
 MainLoop = Callable[[str, list[Message]], str]
 InventoryGetter = Callable[[], dict[str, int]]
+StateGetter = Callable[[], dict]
+
+CLASS_ICONS: dict[str, str] = {
+    "Mage": "🪄",
+    "Warrior": "⚔️",
+    "Healer": "🌿",
+}
 
 EXAMPLE_ACTIONS = ["Look around", "Continue the story"]
 
@@ -99,16 +106,37 @@ def render_inventory(inventory: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
+def render_character(state: dict) -> str:
+    """Render the class/level/XP header for the right column."""
+    cls = state.get("class", "Mage")
+    level = state.get("level", 1)
+    xp = state.get("xp", 0)
+    icon = CLASS_ICONS.get(cls, "✨")
+    return (
+        f"### {icon} {cls}  \n"
+        f"**Level** {level}  \n"
+        f"**XP** {xp}"
+    )
+
+
+def render_sidebar(state: dict) -> str:
+    """Render the full right-column panel (character header + inventory)."""
+    return render_character(state) + "\n\n" + render_inventory(
+        state.get("inventory", {})
+    )
+
+
 def start_game(main_loop: MainLoop, opening: str,
-               get_inventory: InventoryGetter, share: bool = False) -> None:
+               get_state: StateGetter, share: bool = False) -> None:
     """Launch the Gradio chat UI and block until it is closed.
 
     `opening` is pre-seeded as the first assistant message so the game
     is in-scene the moment the page loads, no "start game" prompt
     required. `Clear` resets back to the opening, not an empty chat.
 
-    `get_inventory` returns the current inventory dict so the right
-    column can refresh after every turn, retry, or clear.
+    `get_state` returns the live game_state dict so the right column
+    (class / level / XP header, then inventory) can refresh after
+    every turn, retry, or clear.
     """
     initial_history: list[Message] = [
         {"role": "assistant", "content": opening},
@@ -117,22 +145,22 @@ def start_game(main_loop: MainLoop, opening: str,
     def submit(message: str,
                history: list[Message]) -> tuple[str, list[Message], str]:
         if not message:
-            return "", history, render_inventory(get_inventory())
+            return "", history, render_sidebar(get_state())
         assistant_msg = main_loop(message, history)
         new_history = history + [
             {"role": "user", "content": message},
             {"role": "assistant", "content": assistant_msg},
         ]
-        return "", new_history, render_inventory(get_inventory())
+        return "", new_history, render_sidebar(get_state())
 
     def retry(history: list[Message]) -> tuple[list[Message], str]:
         """Regenerate the assistant reply to the last user message."""
         if not history:
-            return history, render_inventory(get_inventory())
+            return history, render_sidebar(get_state())
         if history[-1]["role"] == "assistant":
             history = history[:-1]
         if not history or history[-1]["role"] != "user":
-            return history, render_inventory(get_inventory())
+            return history, render_sidebar(get_state())
         last_user = history[-1]["content"]
         prior = history[:-1]
         assistant_msg = main_loop(last_user, prior)
@@ -140,7 +168,7 @@ def start_game(main_loop: MainLoop, opening: str,
             {"role": "user", "content": last_user},
             {"role": "assistant", "content": assistant_msg},
         ]
-        return new_history, render_inventory(get_inventory())
+        return new_history, render_sidebar(get_state())
 
     def undo(history: list[Message]) -> tuple[list[Message], str]:
         """Drop the last user/assistant exchange."""
@@ -149,10 +177,10 @@ def start_game(main_loop: MainLoop, opening: str,
             new.pop()
         while new and new[-1]["role"] == "user":
             new.pop()
-        return new, render_inventory(get_inventory())
+        return new, render_sidebar(get_state())
 
     def clear() -> tuple[list[Message], str]:
-        return list(initial_history), render_inventory(get_inventory())
+        return list(initial_history), render_sidebar(get_state())
 
     with gr.Blocks(title="AI RPG, Lunevraie") as demo:
         with gr.Row():
@@ -188,7 +216,7 @@ def start_game(main_loop: MainLoop, opening: str,
                         example_buttons.append((gr.Button(example), example))
             with gr.Column(scale=1):
                 inventory_md = gr.Markdown(
-                    value=render_inventory(get_inventory())
+                    value=render_sidebar(get_state())
                 )
 
         for btn, example in example_buttons:

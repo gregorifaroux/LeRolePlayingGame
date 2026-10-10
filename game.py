@@ -7,11 +7,12 @@ continues the story one short beat at a time as the player types
 actions. Every turn is moderated by Llama Guard 3 (see safety.py).
 
 Module layout:
-    game.py       (this file) config, chat client, prompts, game state,
-                  run_action, main() entrypoint
-    safety.py     Llama Guard moderation + refusal policy
-    inventory.py  item-change detection and inventory updates
-    ui.py         Gradio Blocks layout and launch
+    game.py        (this file) config, chat client, prompts, game state,
+                   run_action, main() entrypoint
+    safety.py      Llama Guard moderation + refusal policy
+    inventory.py   item-change detection and inventory updates
+    progression.py character class, XP judge, level thresholds
+    ui.py          Gradio Blocks layout and launch
 
 Config via env vars:
     OLLAMA_URL     Ollama OpenAI-compatible chat endpoint.
@@ -23,6 +24,7 @@ Config via env vars:
     KINGDOM_NAME   Key under world["kingdoms"].   Default: Éclairia
     TOWN_NAME      Key under kingdom["towns"].    Default: Luciere
     CHARACTER_NAME Key under town["npcs"].        Default: Alaric Éclair
+    CHARACTER_CLASS Mage | Warrior | Healer.      Default: Mage
 
 safety.py reads its own GUARD_MODEL env var.
 """
@@ -35,10 +37,13 @@ from typing import Any
 import requests
 
 from helper import load_world, save_world
-from inventory import (
-    STARTING_INVENTORY,
-    detect_inventory_changes,
-    update_inventory,
+from inventory import detect_inventory_changes, update_inventory
+from progression import (
+    CLASS_INVENTORIES,
+    CLASS_PROMPTS,
+    CLASSES,
+    apply_xp,
+    detect_xp_gain,
 )
 from safety import format_refusal, moderate
 from ui import start_game
@@ -55,6 +60,11 @@ WORLD_FILE = os.getenv("WORLD_FILE", "Lunevraie_L1.json")
 KINGDOM_NAME = os.getenv("KINGDOM_NAME", "Éclairia")
 TOWN_NAME = os.getenv("TOWN_NAME", "Luciere")
 CHARACTER_NAME = os.getenv("CHARACTER_NAME", "Alaric Éclair")
+CHARACTER_CLASS = os.getenv("CHARACTER_CLASS", "Mage")
+if CHARACTER_CLASS not in CLASSES:
+    raise ValueError(
+        f"CHARACTER_CLASS={CHARACTER_CLASS!r} must be one of {CLASSES}"
+    )
 
 RUN_WORLD_FILE = "Lunevraie_L1_run.json"
 
@@ -154,7 +164,10 @@ def build_game_state() -> dict[str, Any]:
         "town": town["description"],
         "character": character["description"],
         "start": start,
-        "inventory": dict(STARTING_INVENTORY),
+        "class": CHARACTER_CLASS,
+        "level": 1,
+        "xp": 0,
+        "inventory": dict(CLASS_INVENTORIES[CHARACTER_CLASS]),
     }
 
 
@@ -187,11 +200,16 @@ def run_action(message: str, history: list[Message],
         f"\nKingdom: {game_state['kingdom']}"
         f"\nTown: {game_state['town']}"
         f"\nYour Character: {game_state['character']}"
+        f"\nClass: {game_state['class']} (Level {game_state['level']}, "
+        f"{game_state['xp']} XP)"
         f"\nInventory: {game_state['inventory']}"
     )
 
+    system_prompt = (
+        ACTION_SYSTEM_PROMPT + "\n" + CLASS_PROMPTS[game_state["class"]]
+    )
     messages: list[Message] = [
-        {"role": "system", "content": ACTION_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": world_info},
         *history,
         {"role": "user", "content": message},
@@ -208,6 +226,10 @@ def run_action(message: str, history: list[Message],
         game_state["inventory"], message, reply
     )
     update_msg = update_inventory(game_state["inventory"], item_updates)
+
+    xp_gained = detect_xp_gain(message, reply)
+    update_msg += apply_xp(game_state, xp_gained)
+
     return reply + update_msg
 
 
@@ -223,7 +245,7 @@ def main() -> None:
     start_game(
         main_loop,
         opening=game_state["start"],
-        get_inventory=lambda: game_state["inventory"],
+        get_state=lambda: game_state,
         share=False,
     )
 
