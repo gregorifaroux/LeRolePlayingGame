@@ -14,7 +14,9 @@ as the world.
 - macOS or Linux
 - Python 3.13
 - [Ollama](https://ollama.com) running on `localhost:11434`
-- Model pulled: `ollama pull qwen2.5:14b`
+- Models pulled:
+  - `ollama pull qwen2.5:14b` (game master)
+  - `ollama pull llama-guard3:1b` (moderation)
 
 Verify Ollama is reachable:
 
@@ -73,6 +75,35 @@ Examples
 
 - `Clear` resets the chat back to the opening scene, not an empty chat
 
+## Safety and moderation
+
+Every player input and every game-master reply is classified by
+[Llama Guard 3](https://ai.meta.com/research/publications/llama-guard-3/)
+(`llama-guard3:1b`) running locally on the same Ollama instance.
+
+The default Llama Guard 3 taxonomy is used, but only a subset of
+hazards hard-refuse the turn:
+
+| Code | Hazard | Behavior |
+|---|---|---|
+| S3 | Sex Crimes | **Blocked** |
+| S4 | Child Sexual Exploitation | **Blocked** |
+| S12 | Sexual Content | **Blocked** |
+| S1 | Violent Crimes (fantasy combat) | Allowed |
+| all others | — | Allowed |
+
+On block, the game master is **not** called. The chat shows an
+in-character refusal:
+
+> The game master pauses. "That is not a path this story will take."
+
+Per turn cost: `guard(input) + qwen(reply) + guard(output)`. The two
+`llama-guard3:1b` calls add roughly 0.5-1s each on an M-series Mac.
+
+To tune the policy, edit `BLOCKED_CATEGORIES` in `game.py`. To swap
+the guard model (e.g. the 8B variant for higher accuracy), set
+`GUARD_MODEL=llama-guard3:8b`.
+
 ## Configuration
 
 All config is env vars with defaults:
@@ -80,7 +111,8 @@ All config is env vars with defaults:
 | Variable | Default | Purpose |
 |---|---|---|
 | `OLLAMA_URL` | `http://localhost:11434/v1/chat/completions` | Ollama OpenAI-compatible endpoint |
-| `OLLAMA_MODEL` | `qwen2.5:14b` | Model tag Ollama has pulled |
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Game-master model tag Ollama has pulled |
+| `GUARD_MODEL` | `llama-guard3:1b` | Llama Guard model tag for moderation |
 | `WORLD_FILE` | `Lunevraie_L1.json` | World data file |
 | `KINGDOM_NAME` | `Éclairia` | Key under `world["kingdoms"]` |
 | `TOWN_NAME` | `Luciere` | Key under `kingdom["towns"]` |

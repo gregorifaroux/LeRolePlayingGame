@@ -9,13 +9,25 @@ player types actions.
 Config via env vars:
     OLLAMA_URL     Ollama OpenAI-compatible chat endpoint.
                    Default: http://localhost:11434/v1/chat/completions
-    OLLAMA_MODEL   Model tag Ollama has pulled.
+    OLLAMA_MODEL   Game-master model tag Ollama has pulled.
                    Default: qwen2.5:14b
+    GUARD_MODEL    Llama Guard model tag for moderation.
+                   Default: llama-guard3:1b
     WORLD_FILE     Path to a world JSON (see Lunevraie_L1.json for shape).
                    Default: Lunevraie_L1.json
     KINGDOM_NAME   Key under world["kingdoms"].   Default: Éclairia
     TOWN_NAME      Key under kingdom["towns"].    Default: Luciere
     CHARACTER_NAME Key under town["npcs"].        Default: Alaric Éclair
+
+Safety:
+    Every player input and every game-master reply is classified by
+    Llama Guard 3 before anything is shown. Fantasy combat (S1 Violent
+    Crimes) is allowed; sex-related hazards are hard-refused:
+        S3  Sex Crimes
+        S4  Child Sexual Exploitation
+        S12 Sexual Content
+    On any of those, the turn is replaced with a short in-character
+    refusal and the game master is not called.
 """
 
 from __future__ import annotations
@@ -35,6 +47,12 @@ OLLAMA_URL = os.getenv(
     "OLLAMA_URL", "http://localhost:11434/v1/chat/completions"
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
+GUARD_MODEL = os.getenv("GUARD_MODEL", "llama-guard3:1b")
+
+BLOCKED_CATEGORIES = frozenset({"S3", "S4", "S12"})
+REFUSAL_TEXT = (
+    "The game master pauses. \"That is not a path this story will take.\""
+)
 
 WORLD_FILE = os.getenv("WORLD_FILE", "Lunevraie_L1.json")
 KINGDOM_NAME = os.getenv("KINGDOM_NAME", "Éclairia")
@@ -69,6 +87,37 @@ def chat(messages: list[Message], temperature: float = 1.0,
     )
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
+
+
+# -- Moderation --------------------------------------------------------------
+
+def moderate(messages: list[Message]) -> tuple[bool, str]:
+    """Classify a conversation with Llama Guard 3. Returns (ok, category).
+
+    Llama Guard replies with either "safe" on one line, or "unsafe\\n<Scode>"
+    on two lines, where <Scode> is a hazard id like S1, S12, etc.
+
+    Only categories in BLOCKED_CATEGORIES fail the check. Everything
+    else, including S1 Violent Crimes (fantasy combat), passes.
+    """
+    r = requests.post(
+        OLLAMA_URL,
+        json={
+            "model": GUARD_MODEL,
+            "messages": messages,
+            "temperature": 0,
+            "stream": False,
+        },
+        timeout=120,
+    )
+    r.raise_for_status()
+    reply = r.json()["choices"][0]["message"]["content"].strip()
+    lines = reply.splitlines()
+    if lines and lines[0].strip().lower() == "unsafe":
+        category = lines[1].strip() if len(lines) > 1 else ""
+        if category in BLOCKED_CATEGORIES:
+            return False, category
+    return True, ""
 
 
 # -- Prompts -----------------------------------------------------------------
@@ -140,8 +189,19 @@ def run_action(message: str, history: list[Message],
     `history` is a list of {"role": ..., "content": ...} messages
     (Gradio 5+ chat format). The opening scene is pre-seeded into the
     chatbot before the first turn, so this function always calls the
-    LLM.
+    game master, unless Llama Guard blocks the turn.
+
+    Flow:
+        1. Moderate the player's input in context. On block, hard-refuse
+           and skip the game master entirely.
+        2. Call the game master.
+        3. Moderate the game master's reply. On block, hard-refuse.
     """
+    guard_history = history + [{"role": "user", "content": message}]
+    is_safe, _ = moderate(guard_history)
+    if not is_safe:
+        return REFUSAL_TEXT
+
     world_info = (
         f"\nWorld: {game_state['world']}"
         f"\nKingdom: {game_state['kingdom']}"
@@ -155,7 +215,14 @@ def run_action(message: str, history: list[Message],
         *history,
         {"role": "user", "content": message},
     ]
-    return chat(messages)
+    reply = chat(messages)
+
+    is_safe, _ = moderate(
+        guard_history + [{"role": "assistant", "content": reply}]
+    )
+    if not is_safe:
+        return REFUSAL_TEXT
+    return reply
 
 
 # -- UI ----------------------------------------------------------------------
