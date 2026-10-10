@@ -117,6 +117,44 @@ Per turn cost: `guard(input) + qwen(reply) + guard(output)`. The two
 
 To tune the policy, edit `BLOCKED_CATEGORIES` in `safety.py`.
 
+## Inventory
+
+Each session carries a mutable item inventory. The player starts with:
+
+| Item | Count |
+|---|---|
+| cloth robes | 1 |
+| silver moon pendant | 1 |
+| spellbook | 1 |
+| gold | 5 |
+
+(Edit `STARTING_INVENTORY` in `inventory.py` to change this.)
+
+Three touch points, all in `game.py`:
+
+1. **Initial state** — `build_game_state()` copies `STARTING_INVENTORY` into
+   `game_state["inventory"]`.
+2. **GM context** — `run_action()` prepends the current inventory to the
+   `world_info` block of every GM call, and the system prompt tells the GM
+   *"Don't let the player use items they don't have in their inventory."*
+3. **Post-reply delta** — after the GM reply passes moderation,
+   `detect_inventory_changes()` makes a second LLM call in JSON mode that
+   returns a list like
+   `[{"name": "sword", "change_amount": 1}, {"name": "gold", "change_amount": -5}]`,
+   and `update_inventory()` applies them in place and returns a summary that
+   gets appended to the chatbot message:
+
+   > You buy a sword from the merchant for 5 gold.
+   > Inventory: sword +1
+   > Inventory: gold -5
+
+Entries that would drop to zero are removed. Negative changes to items the
+player doesn't own are ignored.
+
+The inventory lives in `game_state` for the lifetime of the Python process.
+`Clear` in the UI resets history but not inventory; restart `game.py` to
+reset both.
+
 ## Configuration
 
 All config is env vars with defaults:
@@ -126,6 +164,7 @@ All config is env vars with defaults:
 | `OLLAMA_URL` | `http://localhost:11434/v1/chat/completions` | Ollama OpenAI-compatible endpoint (game master and moderation) |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Game-master model tag Ollama has pulled |
 | `GUARD_MODEL` | `llama-guard3:1b` | Llama Guard model tag for moderation |
+| `INVENTORY_MODEL` | `qwen2.5:14b` | Model tag for the JSON inventory-delta extraction |
 | `WORLD_FILE` | `Lunevraie_L1.json` | World data file |
 | `KINGDOM_NAME` | `Éclairia` | Key under `world["kingdoms"]` |
 | `TOWN_NAME` | `Luciere` | Key under `kingdom["towns"]` |
@@ -162,10 +201,12 @@ new world files.
 
 - `game.py` — entrypoint: config, chat client, prompts, game state, action loop, `main()`
 - `safety.py` — Llama Guard 3 moderation and refusal policy
+- `inventory.py` — starting inventory, item-change detection, inventory updates
 - `ui.py` — Gradio Blocks layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
-- `1. create world/` — notebook that generated the world
+- `1. create world/` — notebook that generated the world (lesson L1)
+- `2. inventory/` — notebook the inventory mechanics are ported from (lesson L4)
 - `requirements.txt` — pinned to the lesson's original versions (see Install for the 3.13 fix)
 - `gameintro.png` — screenshot of the opening screen
 - `.venv/` — local virtualenv (gitignored)

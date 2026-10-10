@@ -7,10 +7,11 @@ continues the story one short beat at a time as the player types
 actions. Every turn is moderated by Llama Guard 3 (see safety.py).
 
 Module layout:
-    game.py    (this file) config, chat client, prompts, game state,
-               run_action, main() entrypoint
-    safety.py  Llama Guard moderation + refusal policy
-    ui.py      Gradio Blocks layout and launch
+    game.py       (this file) config, chat client, prompts, game state,
+                  run_action, main() entrypoint
+    safety.py     Llama Guard moderation + refusal policy
+    inventory.py  item-change detection and inventory updates
+    ui.py         Gradio Blocks layout and launch
 
 Config via env vars:
     OLLAMA_URL     Ollama OpenAI-compatible chat endpoint.
@@ -34,6 +35,11 @@ from typing import Any
 import requests
 
 from helper import load_world, save_world
+from inventory import (
+    STARTING_INVENTORY,
+    detect_inventory_changes,
+    update_inventory,
+)
 from safety import format_refusal, moderate
 from ui import start_game
 
@@ -100,7 +106,8 @@ ACTION_SYSTEM_PROMPT = (
     "Instructions:\n"
     "You must only write 1-3 sentences in response.\n"
     "Always write in second person present tense.\n"
-    "Ex. (You look north and see...)"
+    "Ex. (You look north and see...)\n"
+    "Don't let the player use items they don't have in their inventory."
 )
 
 
@@ -139,6 +146,7 @@ def build_game_state() -> dict[str, Any]:
         "town": town["description"],
         "character": character["description"],
         "start": start,
+        "inventory": dict(STARTING_INVENTORY),
     }
 
 
@@ -154,8 +162,12 @@ def run_action(message: str, history: list[Message],
     Flow:
         1. Moderate the player's input in context. On block, hard-refuse
            and skip the game master entirely.
-        2. Call the game master.
+        2. Call the game master, with the current inventory in context so
+           it won't let the player use items they don't have.
         3. Moderate the game master's reply. On block, hard-refuse.
+        4. Extract inventory deltas from the reply and apply them. Append
+           a short summary line to the chatbot message so the player sees
+           what changed.
     """
     guard_history = history + [{"role": "user", "content": message}]
     is_safe, categories = moderate(guard_history)
@@ -167,6 +179,7 @@ def run_action(message: str, history: list[Message],
         f"\nKingdom: {game_state['kingdom']}"
         f"\nTown: {game_state['town']}"
         f"\nYour Character: {game_state['character']}"
+        f"\nInventory: {game_state['inventory']}"
     )
 
     messages: list[Message] = [
@@ -182,7 +195,10 @@ def run_action(message: str, history: list[Message],
     )
     if not is_safe:
         return format_refusal(categories)
-    return reply
+
+    item_updates = detect_inventory_changes(game_state["inventory"], reply)
+    update_msg = update_inventory(game_state["inventory"], item_updates)
+    return reply + update_msg
 
 
 # -- Entrypoint --------------------------------------------------------------
