@@ -63,17 +63,19 @@ and hit Submit (or Enter).
 - Theme: `gr.themes.Origin()`
 - Light mode is forced by redirecting to `?__theme=light` at page load
   (Gradio 6 reads the mode from the URL query, not from a CSS class)
-- Layout matches the lesson's Gradio 4 ChatInterface:
+- Two-column layout, chat on the left, inventory on the right:
 
 ```
-[ chatbot                            ]
-[ Retry ] [ Undo ] [ Clear ]
-[ textbox              ] [ Submit ]
+[ chatbot                            ] | [ inventory ]
+[ Retry ] [ Undo ] [ Clear ]          | [           ]
+[ textbox              ] [ Submit ]   | [           ]
 Examples
 [ Look around ] [ Continue the story ]
 ```
 
 - `Clear` resets the chat back to the opening scene, not an empty chat
+- The right column refreshes after every submit/retry/clear so the
+  inventory stays in sync with the state
 
 ## Safety and moderation
 
@@ -123,12 +125,18 @@ Each session carries a mutable item inventory. The player starts with:
 
 | Item | Count |
 |---|---|
-| cloth robes | 1 |
-| silver moon pendant | 1 |
-| spellbook | 1 |
-| gold | 5 |
+| 🧥 cloth robes | 1 |
+| 📿 silver moon pendant | 1 |
+| 📖 spellbook | 1 |
+| 🪙 gold | 5 |
 
 (Edit `STARTING_INVENTORY` in `inventory.py` to change this.)
+
+The right column of the UI shows the current inventory with Unicode icons.
+`ITEM_ICONS` in `ui.py` maps common item names to emojis
+(gold, sword, shield, potion, scroll, etc.); anything unmatched falls back
+to 🎒. The mapping also supports substring hits so "magical sword" and
+"shortsword" both pick up ⚔️.
 
 Three touch points, all in `game.py`:
 
@@ -138,15 +146,21 @@ Three touch points, all in `game.py`:
    `world_info` block of every GM call, and the system prompt tells the GM
    *"Don't let the player use items they don't have in their inventory."*
 3. **Post-reply delta** — after the GM reply passes moderation,
-   `detect_inventory_changes()` makes a second LLM call in JSON mode that
-   returns a list like
+   `detect_inventory_changes(inventory, player_action, story)` makes a
+   second LLM call in JSON mode that returns a list like
    `[{"name": "sword", "change_amount": 1}, {"name": "gold", "change_amount": -5}]`,
-   and `update_inventory()` applies them in place and returns a summary that
-   gets appended to the chatbot message:
+   and `update_inventory()` applies them in place and returns a summary
+   that gets appended to the chatbot message:
 
-   > You buy a sword from the merchant for 5 gold.
+   > You hand the merchant 5 gold and he gives you a shortsword.
    > Inventory: sword +1
    > Inventory: gold -5
+
+Both the player's raw action and the GM's narration are passed to the
+detector. This matters when the GM softens the narration: "drop
+spellbook" might come back as "you set the spellbook down carefully
+beside the fountain" — the detector weights the player's stated intent
+and still logs the loss.
 
 Entries that would drop to zero are removed. Negative changes to items the
 player doesn't own are ignored.

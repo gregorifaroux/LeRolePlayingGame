@@ -196,7 +196,9 @@ def run_action(message: str, history: list[Message],
     if not is_safe:
         return format_refusal(categories)
 
-    item_updates = detect_inventory_changes(game_state["inventory"], reply)
+    item_updates = detect_inventory_changes(
+        game_state["inventory"], message, reply
+    )
     update_msg = update_inventory(game_state["inventory"], item_updates)
     return reply + update_msg
 
@@ -210,7 +212,12 @@ def main() -> None:
     def main_loop(message: str, history: list[Message]) -> str:
         return run_action(message, history, game_state)
 
-    start_game(main_loop, opening=game_state["start"], share=False)
+    start_game(
+        main_loop,
+        opening=game_state["start"],
+        get_inventory=lambda: game_state["inventory"],
+        share=False,
+    )
 
 
 if __name__ == "__main__":

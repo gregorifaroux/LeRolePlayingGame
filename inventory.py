@@ -43,19 +43,27 @@ ItemUpdate = dict[str, int | str]
 
 # Few-shot primes the model on the exact output shape. Instruct models
 # otherwise wander into prose or wrap the JSON in markdown fences.
+# Player action is included so the detector sees intent, which matters
+# when the GM softens the narration (e.g. player says "drop spellbook",
+# GM writes "you set the spellbook down beside you" -- intent is loss).
 _FEW_SHOT: list[Message] = [
     {
         "role": "system",
         "content": (
             "You are a JSON-only inventory tracker. You only output "
-            "valid JSON with the key 'itemUpdates'. No other text ever."
+            "valid JSON with the key 'itemUpdates'. No other text ever. "
+            "Weight the player's stated action; the game master's "
+            "narration may soften a drop/give/sell into gentler prose, "
+            "but intent still counts as a loss."
         ),
     },
     {
         "role": "user",
         "content": (
             "Inventory: {'cloth pants': 1, 'cloth shirt': 1, 'gold': 5}\n"
-            "Story: You buy a sword from the merchant for 5 gold."
+            "Player action: I buy a sword from the merchant for 5 gold.\n"
+            "Story: You hand over 5 gold and the merchant passes you "
+            "a shortsword."
         ),
     },
     {
@@ -69,24 +77,44 @@ _FEW_SHOT: list[Message] = [
         "role": "user",
         "content": (
             "Inventory: {'cloth pants': 1, 'gold': 3}\n"
+            "Player action: Look around.\n"
             "Story: You walk through the forest and see a river."
         ),
     },
     {"role": "assistant", "content": '{"itemUpdates": []}'},
+    {
+        "role": "user",
+        "content": (
+            "Inventory: {'spellbook': 1, 'gold': 5}\n"
+            "Player action: drop the spellbook.\n"
+            "Story: You set the spellbook down carefully beside the "
+            "fountain."
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": '{"itemUpdates": [{"name": "spellbook", "change_amount": -1}]}',
+    },
 ]
 
 
-def detect_inventory_changes(inventory: dict[str, int],
+def detect_inventory_changes(inventory: dict[str, int], player_action: str,
                              story: str) -> list[ItemUpdate]:
-    """Return the list of inventory deltas implied by a story beat.
+    """Return the list of inventory deltas implied by this turn.
 
-    JSON mode is enabled server-side (`response_format: json_object`)
-    so the model is forced to emit parseable JSON.
+    `player_action` is the raw player input; `story` is the GM's reply.
+    Passing both lets the detector weight the player's stated intent
+    when the GM softens the narration. JSON mode is enabled server-side
+    (`response_format: json_object`) so the model emits parseable JSON.
     """
     messages = _FEW_SHOT + [
         {
             "role": "user",
-            "content": f"Inventory: {inventory}\nStory: {story}",
+            "content": (
+                f"Inventory: {inventory}\n"
+                f"Player action: {player_action}\n"
+                f"Story: {story}"
+            ),
         }
     ]
     r = requests.post(
