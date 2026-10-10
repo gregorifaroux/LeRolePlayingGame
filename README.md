@@ -155,6 +155,35 @@ The inventory lives in `game_state` for the lifetime of the Python process.
 `Clear` in the UI resets history but not inventory; restart `game.py` to
 reset both.
 
+## Design: LLM reasons, code arbitrates
+
+The game uses three LLM calls per turn (`guard(input) + GM + guard(output) +
+inventory extract`), wrapped in deterministic Python that owns the state
+and the policy:
+
+- **Prompts** steer the game master's narration. Free-form text out.
+- **JSON mode + few-shot** forces the inventory call to emit a structured
+  delta list instead of prose
+  (`[{"name": "sword", "change_amount": 1}, ...]`).
+- **Deterministic Python** does the state transitions. `update_inventory`
+  is dict math, `moderate` is a `frozenset` membership check,
+  `format_refusal` is string formatting. No LLM touches the state directly.
+
+The determinism is only at the boundaries. The LLM can still hallucinate
+item names ("ancient relic" when the inventory shows "spellbook"),
+misclassify a hazard, or ignore the inventory the prompt showed it. Three
+guardrails against that:
+
+- `temperature=0` on the guard call.
+- Few-shot JSON priming on the inventory call, plus `temperature=0.3` to
+  keep structure stable without going fully greedy.
+- Python-side policy: `BLOCKED_CATEGORIES` is a hardcoded allowlist of what
+  matters; `update_inventory` ignores negative deltas on items the player
+  doesn't own and drops entries that fall to zero.
+
+End-to-end deterministic? No. Deterministic *at the state-mutation
+surface*? Yes.
+
 ## Configuration
 
 All config is env vars with defaults:
