@@ -158,7 +158,7 @@ def run_action(message: str, history: list[Message],
         3. Moderate the game master's reply. On block, hard-refuse.
     """
     guard_history = history + [{"role": "user", "content": message}]
-    is_safe, _ = moderate(guard_history)
+    is_safe, _ = moderate(guard_history, role_to_check="User")
     if not is_safe:
         return REFUSAL_TEXT
 
@@ -178,7 +178,8 @@ def run_action(message: str, history: list[Message],
     reply = chat(messages)
 
     is_safe, _ = moderate(
-        guard_history + [{"role": "assistant", "content": reply}]
+        guard_history + [{"role": "assistant", "content": reply}],
+        role_to_check="Agent",
     )
     if not is_safe:
         return REFUSAL_TEXT
