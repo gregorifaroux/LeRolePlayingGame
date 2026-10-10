@@ -147,7 +147,9 @@ new world files.
 
 ## Files
 
-- `game.py` — chat UI + action loop
+- `game.py` — entrypoint: config, chat client, prompts, game state, action loop, `main()`
+- `safety.py` — Llama Guard 3 moderation and refusal policy
+- `ui.py` — Gradio Blocks layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
 - `1. create world/` — notebook that generated the world

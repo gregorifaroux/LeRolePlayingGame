@@ -1,33 +1,29 @@
 #!/usr/bin/env python3
 """Interactive AI role-playing game, local-Ollama edition.
 
-Runs a Gradio chat UI backed by a local Ollama model. The game master
-(the LLM) generates an opening scene from a chosen world/kingdom/town/
-character, then continues the story one short beat at a time as the
-player types actions.
+Entrypoint. The game master (an Ollama-hosted LLM) generates an
+opening scene from a chosen world/kingdom/town/character, then
+continues the story one short beat at a time as the player types
+actions. Every turn is moderated by Llama Guard 3 (see safety.py).
+
+Module layout:
+    game.py    (this file) config, chat client, prompts, game state,
+               run_action, main() entrypoint
+    safety.py  Llama Guard moderation + refusal policy
+    ui.py      Gradio Blocks layout and launch
 
 Config via env vars:
     OLLAMA_URL     Ollama OpenAI-compatible chat endpoint.
                    Default: http://localhost:11434/v1/chat/completions
     OLLAMA_MODEL   Game-master model tag Ollama has pulled.
                    Default: qwen2.5:14b
-    GUARD_MODEL    Llama Guard model tag for moderation.
-                   Default: llama-guard3:1b
     WORLD_FILE     Path to a world JSON (see Lunevraie_L1.json for shape).
                    Default: Lunevraie_L1.json
     KINGDOM_NAME   Key under world["kingdoms"].   Default: Éclairia
     TOWN_NAME      Key under kingdom["towns"].    Default: Luciere
     CHARACTER_NAME Key under town["npcs"].        Default: Alaric Éclair
 
-Safety:
-    Every player input and every game-master reply is classified by
-    Llama Guard 3 before anything is shown. Fantasy combat (S1 Violent
-    Crimes) is allowed; sex-related hazards are hard-refused:
-        S3  Sex Crimes
-        S4  Child Sexual Exploitation
-        S12 Sexual Content
-    On any of those, the turn is replaced with a short in-character
-    refusal and the game master is not called.
+safety.py reads its own GUARD_MODEL env var.
 """
 
 from __future__ import annotations
@@ -35,10 +31,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import gradio as gr
 import requests
 
 from helper import load_world, save_world
+from safety import REFUSAL_TEXT, moderate
+from ui import start_game
 
 
 # -- Config ------------------------------------------------------------------
@@ -47,12 +44,6 @@ OLLAMA_URL = os.getenv(
     "OLLAMA_URL", "http://localhost:11434/v1/chat/completions"
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
-GUARD_MODEL = os.getenv("GUARD_MODEL", "llama-guard3:1b")
-
-BLOCKED_CATEGORIES = frozenset({"S3", "S4", "S12"})
-REFUSAL_TEXT = (
-    "The game master pauses. \"That is not a path this story will take.\""
-)
 
 WORLD_FILE = os.getenv("WORLD_FILE", "Lunevraie_L1.json")
 KINGDOM_NAME = os.getenv("KINGDOM_NAME", "Éclairia")
@@ -87,37 +78,6 @@ def chat(messages: list[Message], temperature: float = 1.0,
     )
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
-
-
-# -- Moderation --------------------------------------------------------------
-
-def moderate(messages: list[Message]) -> tuple[bool, str]:
-    """Classify a conversation with Llama Guard 3. Returns (ok, category).
-
-    Llama Guard replies with either "safe" on one line, or "unsafe\\n<Scode>"
-    on two lines, where <Scode> is a hazard id like S1, S12, etc.
-
-    Only categories in BLOCKED_CATEGORIES fail the check. Everything
-    else, including S1 Violent Crimes (fantasy combat), passes.
-    """
-    r = requests.post(
-        OLLAMA_URL,
-        json={
-            "model": GUARD_MODEL,
-            "messages": messages,
-            "temperature": 0,
-            "stream": False,
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    reply = r.json()["choices"][0]["message"]["content"].strip()
-    lines = reply.splitlines()
-    if lines and lines[0].strip().lower() == "unsafe":
-        category = lines[1].strip() if len(lines) > 1 else ""
-        if category in BLOCKED_CATEGORIES:
-            return False, category
-    return True, ""
 
 
 # -- Prompts -----------------------------------------------------------------
@@ -225,118 +185,7 @@ def run_action(message: str, history: list[Message],
     return reply
 
 
-# -- UI ----------------------------------------------------------------------
-
-EXAMPLE_ACTIONS = ["Look around", "Continue the story"]
-
-FORCE_LIGHT_JS = """() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('__theme') !== 'light') {
-        url.searchParams.set('__theme', 'light');
-        window.location.replace(url.toString());
-    }
-}"""
-
-
-def start_game(main_loop, opening: str, share: bool = False) -> None:
-    """Launch the Gradio chat UI and block until it is closed.
-
-    `opening` is pre-seeded as the first assistant message so the game
-    starts in-scene the moment the page loads, no "start game" prompt
-    required.
-
-    Built as a manual Blocks layout, matching the lesson's Gradio 4.x
-    ChatInterface shape:
-
-        [ chatbot                                      ]
-        [ Retry ] [ Undo ] [ Clear ]
-        [ textbox                        ] [ Submit ]
-        Examples
-        [ Look around ] [ Continue the story ]
-
-    Light mode is forced by redirecting to `?__theme=light` on page
-    load, which is the mechanism Gradio 6 reads.
-    """
-    initial_history: list[Message] = [
-        {"role": "assistant", "content": opening},
-    ]
-
-    def submit(message: str, history: list[Message]) -> tuple[str, list[Message]]:
-        if not message:
-            return "", history
-        assistant_msg = main_loop(message, history)
-        return "", history + [
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": assistant_msg},
-        ]
-
-    def retry(history: list[Message]) -> list[Message]:
-        """Regenerate the assistant reply to the last user message."""
-        if not history:
-            return history
-        if history[-1]["role"] == "assistant":
-            history = history[:-1]
-        if not history or history[-1]["role"] != "user":
-            return history
-        last_user = history[-1]["content"]
-        prior = history[:-1]
-        assistant_msg = main_loop(last_user, prior)
-        return prior + [
-            {"role": "user", "content": last_user},
-            {"role": "assistant", "content": assistant_msg},
-        ]
-
-    def undo(history: list[Message]) -> list[Message]:
-        """Drop the last user/assistant exchange."""
-        new = list(history)
-        while new and new[-1]["role"] == "assistant":
-            new.pop()
-        while new and new[-1]["role"] == "user":
-            new.pop()
-        return new
-
-    def clear() -> list[Message]:
-        return list(initial_history)
-
-    with gr.Blocks(title="AI RPG, Lunevraie") as demo:
-        chatbot = gr.Chatbot(
-            height=400,
-            label="Chatbot",
-            value=initial_history,
-        )
-        with gr.Row():
-            retry_btn = gr.Button("Retry")
-            undo_btn = gr.Button("Undo")
-            clear_btn = gr.Button("Clear")
-        with gr.Row():
-            textbox = gr.Textbox(
-                placeholder="What do you do next?",
-                container=False,
-                scale=7,
-            )
-            submit_btn = gr.Button("Submit", variant="primary", scale=1)
-        gr.Markdown("### Examples")
-        with gr.Row():
-            for example in EXAMPLE_ACTIONS:
-                gr.Button(example).click(
-                    lambda h, m=example: submit(m, h),
-                    inputs=[chatbot],
-                    outputs=[textbox, chatbot],
-                )
-
-        submit_btn.click(submit, inputs=[textbox, chatbot], outputs=[textbox, chatbot])
-        textbox.submit(submit, inputs=[textbox, chatbot], outputs=[textbox, chatbot])
-        retry_btn.click(retry, inputs=[chatbot], outputs=[chatbot])
-        undo_btn.click(undo, inputs=[chatbot], outputs=[chatbot])
-        clear_btn.click(clear, outputs=[chatbot])
-
-    demo.launch(
-        share=share,
-        server_name="127.0.0.1",
-        theme=gr.themes.Origin(),
-        js=FORCE_LIGHT_JS,
-    )
-
+# -- Entrypoint --------------------------------------------------------------
 
 def main() -> None:
     game_state = build_game_state()
