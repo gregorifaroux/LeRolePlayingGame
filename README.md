@@ -79,44 +79,43 @@ Examples
 
 Every player input and every game-master reply is classified by
 [Llama Guard 3](https://ai.meta.com/research/publications/llama-guard-3/)
-(`llama-guard3:1b`) running locally on the same Ollama instance.
-
-A **custom content policy** is used, not Llama Guard 3's default
-taxonomy. The policy is from the DeepLearning.AI course lesson:
+(`llama-guard3:1b`) running locally on the same Ollama instance,
+using the model's **native S1-S14 hazard taxonomy**. A short Python
+blocklist in `safety.py` decides which hazards refuse the turn:
 
 | Code | Category | Behavior |
 |---|---|---|
-| O1 | Violence and Hate | **Blocks** slurs, hate speech, gruesome / graphic violence. **Allows** tame fantasy violence (sword fights, monsters). |
-| O2 | Sexual Content | **Blocks** sexual acts, sexual anatomy, kid-inappropriate content. **Allows** kissing, flirting, romance. |
-| O3 | Self-Harm | **Blocks** encouragement of self-harm, romanticizing suicide, suicide stories. |
-| O4 | Profanity | **Blocks** profane language that isn't kid-appropriate. |
-| O5 | Regulated or Controlled Substances | **Blocks** stories depicting, glorifying, or encouraging drug use. |
+| S3 | Sex Crimes | **Blocked** |
+| S4 | Child Sexual Exploitation | **Blocked** |
+| S10 | Hate | **Blocked** |
+| S11 | Self-Harm | **Blocked** |
+| S12 | Sexual Content | **Blocked** |
+| S1 | Violent Crimes | Allowed (fantasy combat) |
+| all others | — | Allowed |
 
-Any violation hard-refuses the turn. The game master is **not**
-called. The chat shows an in-character refusal:
+Any blocked hazard hard-refuses the turn. The game master is **not**
+called. The chat shows an in-character refusal with the violated
+hazard appended:
 
-> The game master pauses. "That is not a path this story will take."
+> The game master pauses. "That is not a path this story will take." (violated: S11: Self-Harm)
 
-**How the policy is applied**: Ollama's `llama-guard3` chat template
-bakes in the default S1-S14 taxonomy, so `/v1/chat/completions` would
-ignore a custom policy. `safety.py` builds the Llama Guard prompt by
-hand and hits `/api/generate` with `raw=True` to feed the categories
-directly to the model.
+**Why the native taxonomy**: An earlier version used the course's
+custom O1-O5 content policy over `/api/generate` with `raw=True`. The
+1b model has strong priors on its S1-S14 training set and misassigns
+self-harm content to `S3` under a custom policy. The 8b handles
+custom policies but costs 5 GB and is slower. Running the native
+taxonomy with a Python blocklist keeps the 1b accurate and the
+moderation decision auditable.
 
-**Accuracy caveat**: `llama-guard3:1b` was trained on the S1-S14
-hazard set, so it maps custom categories onto its priors. Observed
-in practice:
-
-- O1 Violence / O2 Sexual content: caught reliably
-- O3 Self-Harm / O4 Profanity / O5 Drugs: caught inconsistently
-
-For stricter enforcement set `GUARD_MODEL=llama-guard3:8b` after
-`ollama pull llama-guard3:8b`.
+**Known gaps vs. the course policy**: the native taxonomy does not
+cover profanity (O4) or recreational drug use (O5). If you need
+those, set `GUARD_MODEL=llama-guard3:8b` after
+`ollama pull llama-guard3:8b` and revive the custom-policy branch.
 
 Per turn cost: `guard(input) + qwen(reply) + guard(output)`. The two
 `llama-guard3:1b` calls add roughly 0.5-1s each on an M-series Mac.
 
-To tune the policy, edit `CONTENT_POLICY` in `safety.py`.
+To tune the policy, edit `BLOCKED_CATEGORIES` in `safety.py`.
 
 ## Configuration
 
@@ -124,8 +123,7 @@ All config is env vars with defaults:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434/v1/chat/completions` | Ollama OpenAI-compatible endpoint (game master) |
-| `OLLAMA_BASE` | `http://localhost:11434` | Ollama base URL (moderation uses `/api/generate` under this) |
+| `OLLAMA_URL` | `http://localhost:11434/v1/chat/completions` | Ollama OpenAI-compatible endpoint (game master and moderation) |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Game-master model tag Ollama has pulled |
 | `GUARD_MODEL` | `llama-guard3:1b` | Llama Guard model tag for moderation |
 | `WORLD_FILE` | `Lunevraie_L1.json` | World data file |

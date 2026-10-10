@@ -1,20 +1,36 @@
-"""Llama Guard 3 moderation with a custom content policy.
+"""Llama Guard 3 moderation using the native S1-S14 hazard taxonomy.
 
-The default `llama-guard3:1b` chat template on Ollama embeds Meta's
-S1-S14 taxonomy, so sending categories through `/v1/chat/completions`
-does nothing. To actually drive classification by a custom policy we
-build the Llama Guard prompt by hand and hit `/api/generate` with
-`raw=True`, bypassing the baked-in template.
-
-Policy categories O1-O5 are from the DeepLearning.AI course lesson:
-tame fantasy violence is allowed, sexual content is blocked,
-self-harm / profanity / drug content is blocked.
+The 1b model is accurate on the categories it was trained on but
+mis-maps content when the prompt tries to override those categories.
+This module uses the trained taxonomy as-is via Ollama's
+`/v1/chat/completions` endpoint and chooses which hazards block the
+turn with a Python-side allowlist, so the moderation decision stays
+local and auditable.
 
 Config via env vars:
-    OLLAMA_BASE  Ollama HTTP base URL.
-                 Default: http://localhost:11434
+    OLLAMA_URL   Ollama OpenAI-compatible chat endpoint.
+                 Default: http://localhost:11434/v1/chat/completions
     GUARD_MODEL  Llama Guard model tag.
                  Default: llama-guard3:1b
+
+Policy (what each S-code means and whether we block it):
+    S1  Violent Crimes            allowed (fantasy combat)
+    S2  Non-Violent Crimes        allowed
+    S3  Sex Crimes                blocked
+    S4  Child Sexual Exploitation blocked
+    S5  Defamation                allowed
+    S6  Specialized Advice        allowed
+    S7  Privacy                   allowed
+    S8  Intellectual Property     allowed
+    S9  Indiscriminate Weapons    allowed
+    S10 Hate                      blocked
+    S11 Self-Harm                 blocked
+    S12 Sexual Content            blocked
+    S13 Elections                 allowed
+    S14 Code Interpreter Abuse    allowed
+
+Gaps vs. the DeepLearning.AI course policy: profanity and drug use
+are not covered by the native taxonomy and are not filtered here.
 """
 
 from __future__ import annotations
@@ -23,103 +39,77 @@ import os
 
 import requests
 
-OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
-GENERATE_URL = f"{OLLAMA_BASE}/api/generate"
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL", "http://localhost:11434/v1/chat/completions"
+)
 GUARD_MODEL = os.getenv("GUARD_MODEL", "llama-guard3:1b")
+
+BLOCKED_CATEGORIES = frozenset({"S3", "S4", "S10", "S11", "S12"})
 
 REFUSAL_TEXT = (
     "The game master pauses. \"That is not a path this story will take.\""
 )
 
-CONTENT_POLICY = """O1: Violence and Hate.
-Should not
-- Express hateful, derogatory, or demeaning sentiments against people based on sensitive personal characteristics.
-- Use slurs based on personal characteristics
-- Write gruesome / graphic violence.
-Can
-- Write tame fantasy violence
-O2: Sexual Content.
-Should not
-- Write any somewhat sexual content that mentions sexual functions or sexual body parts.
-- Write any content that would be inappropriate for kids.
-Can
-- Write romantic content (including kissing, flirting etc...)
-O3: Self-Harm.
-Should not
-- Encourage people to harm themselves.
-- Romanticize or condone self-harm or suicide.
-- Write story depicting suicide.
-O4: Profanity.
-Should not
-- Write with any profane language that wouldn't be appropriate for kids.
-Can
-- Write with kid appropriate language
-O5: Regulated or Controlled Substances.
-Should not
-- Write stories that depicts, glorifies or encourages drug use."""
-
-PROMPT_TEMPLATE = """<|begin_of_text|><|start_header_id|>user<|end_header_id|>
-
-Task: Check if there is unsafe content in '{role}' messages in conversations according to our safety policy with the below categories.
-
-<BEGIN UNSAFE CONTENT CATEGORIES>
-{policy}
-<END UNSAFE CONTENT CATEGORIES>
-
-<BEGIN CONVERSATION>
-
-{conversation}
-
-<END CONVERSATION>
-
-Provide your safety assessment for ONLY THE LAST {role} message in the above conversation:
-- First line must read 'safe' or 'unsafe'.
-- If unsafe, a second line must include a comma-separated list of violated categories.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-"""
+CATEGORY_TITLES = {
+    "S1": "Violent Crimes",
+    "S2": "Non-Violent Crimes",
+    "S3": "Sex Crimes",
+    "S4": "Child Sexual Exploitation",
+    "S5": "Defamation",
+    "S6": "Specialized Advice",
+    "S7": "Privacy",
+    "S8": "Intellectual Property",
+    "S9": "Indiscriminate Weapons",
+    "S10": "Hate",
+    "S11": "Self-Harm",
+    "S12": "Sexual Content",
+    "S13": "Elections",
+    "S14": "Code Interpreter Abuse",
+}
 
 Message = dict[str, str]
 
 
-def _format_conversation(messages: list[Message]) -> str:
-    lines = []
-    for m in messages:
-        tag = "User" if m["role"] == "user" else "Agent"
-        lines.append(f"{tag}: {m['content']}")
-    return "\n\n".join(lines)
+def format_refusal(categories: str) -> str:
+    """Refusal line, with a parenthetical list of violated categories.
 
-
-def moderate(messages: list[Message],
-             role_to_check: str = "User") -> tuple[bool, str]:
-    """Classify the last `role_to_check` turn against CONTENT_POLICY.
-
-    `role_to_check` is "User" when checking a player input and "Agent"
-    when checking the game master's reply, matching Llama Guard 3's
-    prompt vocabulary.
-
-    Returns (ok, violated_categories). Any violation = block, since the
-    whole policy is intended to apply.
+    `categories` is the comma-separated category string Llama Guard
+    returned on the second line of an "unsafe" reply.
     """
-    prompt = PROMPT_TEMPLATE.format(
-        role=role_to_check,
-        policy=CONTENT_POLICY,
-        conversation=_format_conversation(messages),
-    )
+    if not categories:
+        return REFUSAL_TEXT
+    labeled = []
+    for code in (c.strip() for c in categories.split(",")):
+        title = CATEGORY_TITLES.get(code)
+        labeled.append(f"{code}: {title}" if title else code)
+    return f"{REFUSAL_TEXT} (violated: {', '.join(labeled)})"
+
+
+def moderate(messages: list[Message]) -> tuple[bool, str]:
+    """Classify a conversation with Llama Guard 3. Returns (ok, categories).
+
+    Llama Guard replies "safe" on one line, or "unsafe\\n<Scode>" on
+    two lines, where <Scode> is a hazard id (S1, S12, etc.).
+
+    Only categories in BLOCKED_CATEGORIES fail the check. S1 Violent
+    Crimes passes so fantasy combat still works.
+    """
     r = requests.post(
-        GENERATE_URL,
+        OLLAMA_URL,
         json={
             "model": GUARD_MODEL,
-            "prompt": prompt,
-            "raw": True,
+            "messages": messages,
+            "temperature": 0,
             "stream": False,
-            "options": {"temperature": 0},
         },
         timeout=120,
     )
     r.raise_for_status()
-    reply = r.json()["response"].strip()
+    reply = r.json()["choices"][0]["message"]["content"].strip()
     lines = reply.splitlines()
     if lines and lines[0].strip().lower() == "unsafe":
         categories = lines[1].strip() if len(lines) > 1 else ""
-        return False, categories
+        codes = {c.strip() for c in categories.split(",") if c.strip()}
+        if codes & BLOCKED_CATEGORIES:
+            return False, categories
     return True, ""

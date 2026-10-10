@@ -34,7 +34,7 @@ from typing import Any
 import requests
 
 from helper import load_world, save_world
-from safety import REFUSAL_TEXT, moderate
+from safety import format_refusal, moderate
 from ui import start_game
 
 
@@ -158,9 +158,9 @@ def run_action(message: str, history: list[Message],
         3. Moderate the game master's reply. On block, hard-refuse.
     """
     guard_history = history + [{"role": "user", "content": message}]
-    is_safe, _ = moderate(guard_history, role_to_check="User")
+    is_safe, categories = moderate(guard_history)
     if not is_safe:
-        return REFUSAL_TEXT
+        return format_refusal(categories)
 
     world_info = (
         f"\nWorld: {game_state['world']}"
@@ -177,12 +177,11 @@ def run_action(message: str, history: list[Message],
     ]
     reply = chat(messages)
 
-    is_safe, _ = moderate(
-        guard_history + [{"role": "assistant", "content": reply}],
-        role_to_check="Agent",
+    is_safe, categories = moderate(
+        guard_history + [{"role": "assistant", "content": reply}]
     )
     if not is_safe:
-        return REFUSAL_TEXT
+        return format_refusal(categories)
     return reply
 
 
