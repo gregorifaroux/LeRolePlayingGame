@@ -100,7 +100,7 @@ in-character refusal:
 Per turn cost: `guard(input) + qwen(reply) + guard(output)`. The two
 `llama-guard3:1b` calls add roughly 0.5-1s each on an M-series Mac.
 
-To tune the policy, edit `BLOCKED_CATEGORIES` in `game.py`. To swap
+To tune the policy, edit `BLOCKED_CATEGORIES` in `safety.py`. To swap
 the guard model (e.g. the 8B variant for higher accuracy), set
 `GUARD_MODEL=llama-guard3:8b`.
 
