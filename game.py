@@ -93,6 +93,10 @@ START_SYSTEM_PROMPT = (
     "adventure based on the world, kingdom, town and character a player "
     "is playing as.\n"
     "Instructions:\n"
+    "Write all narration in English. The only exception is magic: "
+    "spell names and incantations stay in French (e.g. "
+    '"Lumière de Lune", "Éclat Argenté"). Do not use any other '
+    "language or script.\n"
     "You must only use 2-4 sentences.\n"
     'Write in second person. For example: "You are Jack".\n'
     'Write in present tense. For example "You stand at...".\n'
@@ -104,6 +108,10 @@ ACTION_SYSTEM_PROMPT = (
     "You are an AI Game master. Your job is to write what happens next "
     "in a player's adventure game.\n"
     "Instructions:\n"
+    "Write all narration in English. The only exception is magic: "
+    "spell names and incantations stay in French (e.g. "
+    '"Lumière de Lune", "Éclat Argenté"). Do not use any other '
+    "language or script.\n"
     "You must only write 1-3 sentences in response.\n"
     "Always write in second person present tense.\n"
     "Ex. (You look north and see...)\n"

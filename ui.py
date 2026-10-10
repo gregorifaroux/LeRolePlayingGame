@@ -3,14 +3,15 @@
 Two-column Blocks layout:
 
     [ chatbot                            ] | [ inventory ]
-    [ Retry ] [ Undo ] [ Clear ]          | [           ]
     [ textbox              ] [ Submit ]   | [           ]
+    [🔄] [↩️] [🗑️]                          | [           ]
     Examples
     [ Look around ] [ Continue the story ]
 
-Light mode is forced via a page-load JS redirect to `?__theme=light`
-because Gradio 6 reads the theme mode from the URL query, not from a
-CSS class.
+Retry / Undo / Clear are small icon-only buttons under the input so
+they stay out of the player's way until needed. Light mode is forced
+via a page-load JS redirect to `?__theme=light` because Gradio 6 reads
+the theme mode from the URL query, not from a CSS class.
 """
 
 from __future__ import annotations
@@ -162,10 +163,6 @@ def start_game(main_loop: MainLoop, opening: str,
                     value=initial_history,
                 )
                 with gr.Row():
-                    retry_btn = gr.Button("Retry")
-                    undo_btn = gr.Button("Undo")
-                    clear_btn = gr.Button("Clear")
-                with gr.Row():
                     textbox = gr.Textbox(
                         placeholder="What do you do next?",
                         container=False,
@@ -173,6 +170,16 @@ def start_game(main_loop: MainLoop, opening: str,
                     )
                     submit_btn = gr.Button(
                         "Submit", variant="primary", scale=1
+                    )
+                with gr.Row():
+                    retry_btn = gr.Button(
+                        "🔄 Retry", size="sm", scale=0, min_width=90
+                    )
+                    undo_btn = gr.Button(
+                        "↩️ Undo", size="sm", scale=0, min_width=90
+                    )
+                    clear_btn = gr.Button(
+                        "🗑️ Clear", size="sm", scale=0, min_width=90
                     )
                 gr.Markdown("### Examples")
                 example_buttons: list[tuple[gr.Button, str]] = []
