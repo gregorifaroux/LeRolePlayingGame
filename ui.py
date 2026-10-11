@@ -178,21 +178,33 @@ def render_sidebar(state: dict) -> str:
     )
 
 
-def start_game(main_loop: MainLoop, opening: str,
-               get_state: StateGetter, share: bool = False) -> None:
+def start_game(
+    main_loop: MainLoop,
+    opening: str,
+    get_state: StateGetter,
+    initial_history: list[Message] | None = None,
+    on_turn: Callable[[list[Message]], None] | None = None,
+    on_clear: Callable[[], list[Message]] | None = None,
+    share: bool = False,
+) -> None:
     """Launch the Gradio chat UI and block until it is closed.
 
-    `opening` is pre-seeded as the first assistant message so the game
-    is in-scene the moment the page loads, no "start game" prompt
-    required. `Clear` resets back to the opening, not an empty chat.
+    `opening` is the first assistant message of a fresh game.
+    `initial_history` is what the chat displays on page load — pass the
+    resumed save history, or None to start fresh at `opening`.
+    `on_turn(history)` fires after every submit/retry/undo so callers
+    can persist state. `on_clear()` fires when the player hits Clear;
+    it should wipe any save and return the fresh history to display.
 
     `get_state` returns the live game_state dict so the right column
     (class / level / XP header, then inventory) can refresh after
     every turn, retry, or clear.
     """
-    initial_history: list[Message] = [
+    opening_history: list[Message] = [
         {"role": "assistant", "content": opening},
     ]
+    if initial_history is None:
+        initial_history = opening_history
 
     def submit(message: str,
                history: list[Message]) -> tuple[str, list[Message], str]:
@@ -203,6 +215,8 @@ def start_game(main_loop: MainLoop, opening: str,
             {"role": "user", "content": message},
             {"role": "assistant", "content": assistant_msg},
         ]
+        if on_turn is not None:
+            on_turn(new_history)
         return "", new_history, render_sidebar(get_state())
 
     def retry(history: list[Message]) -> tuple[list[Message], str]:
@@ -220,6 +234,8 @@ def start_game(main_loop: MainLoop, opening: str,
             {"role": "user", "content": last_user},
             {"role": "assistant", "content": assistant_msg},
         ]
+        if on_turn is not None:
+            on_turn(new_history)
         return new_history, render_sidebar(get_state())
 
     def undo(history: list[Message]) -> tuple[list[Message], str]:
@@ -229,10 +245,16 @@ def start_game(main_loop: MainLoop, opening: str,
             new.pop()
         while new and new[-1]["role"] == "user":
             new.pop()
+        if on_turn is not None:
+            on_turn(new)
         return new, render_sidebar(get_state())
 
     def clear() -> tuple[list[Message], str]:
-        return list(initial_history), render_sidebar(get_state())
+        if on_clear is not None:
+            fresh = on_clear()
+        else:
+            fresh = list(opening_history)
+        return fresh, render_sidebar(get_state())
 
     with gr.Blocks(title="AI RPG, Lunevraie") as demo:
         with gr.Row():

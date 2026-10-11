@@ -52,4 +52,5 @@ gradio_cached_examples/
 # Project artifacts
 Lunevraie_L1_run.json
 YourWorld_L1.json
+save.json
 *.log

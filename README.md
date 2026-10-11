@@ -226,9 +226,29 @@ appended to the chatbot message:
 The right column of the UI shows the current class / level / XP header
 above the inventory and refreshes after each turn.
 
-**Persistence**: class/level/XP/inventory live in `game_state` for the
-process lifetime only. Restarting resets everything. Cross-session save
-is not wired up yet.
+## Persistence
+
+The game writes `save.json` after every submit / retry / undo. The
+file holds the full `game_state` (world/kingdom/town/character slice,
+class, level, XP, inventory) plus the chat history.
+
+On startup, `game.py:main()` checks for a save:
+
+- **Found and the character name + class still match the env vars** →
+  it's loaded and the chat opens where you left off. No new opening
+  scene is generated (fast start).
+- **Found but character / class changed** → the save is ignored and a
+  fresh opening is generated.
+- **Not found** → fresh opening, then written to `save.json` so the
+  next restart can resume.
+
+**Clear** wipes `save.json`, resets XP / level / inventory to the
+class defaults, and restores *this process's* original opening scene.
+To get a brand-new opening (new backstory, new intro), stop the server
+and run `./start.sh` again.
+
+Override the save location with `SAVE_FILE=/path/to/save.json`.
+`save.json` is gitignored.
 
 ## Design: LLM reasons, code arbitrates
 
@@ -276,6 +296,7 @@ All config is env vars with defaults:
 | `TOWN_NAME` | `Luciere` | Key under `kingdom["towns"]` |
 | `CHARACTER_NAME` | `Alaric Éclair` | Key under `town["npcs"]` |
 | `CHARACTER_CLASS` | `Mage` | `Mage` \| `Warrior` \| `Healer` |
+| `SAVE_FILE` | `save.json` | Cross-session save path (see Persistence) |
 
 Swap character:
 
@@ -311,6 +332,7 @@ new world files.
 - `safety.py` — Llama Guard 3 moderation and refusal policy
 - `inventory.py` — starting inventory, item-change detection, inventory updates
 - `progression.py` — class presets, XP judge, level thresholds
+- `persistence.py` — cross-session save / load / clear
 - `ui.py` — Gradio Blocks three-column layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
@@ -320,3 +342,4 @@ new world files.
 - `gameintro.png` — screenshot of the opening screen
 - `.venv/` — local virtualenv (gitignored)
 - `Lunevraie_L1_run.json` — world + generated opening, written each run (gitignored)
+- `save.json` — latest game state + chat history, written each turn (gitignored)

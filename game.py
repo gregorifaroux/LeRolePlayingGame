@@ -12,6 +12,7 @@ Module layout:
     safety.py      Llama Guard moderation + refusal policy
     inventory.py   item-change detection and inventory updates
     progression.py character class, XP judge, level thresholds
+    persistence.py cross-session save / load / clear
     ui.py          Gradio Blocks layout and launch
 
 Config via env vars:
@@ -38,6 +39,7 @@ import requests
 
 from helper import load_world, save_world
 from inventory import detect_inventory_changes, update_inventory
+from persistence import delete_save, load_save, save_game
 from progression import (
     CLASS_INVENTORIES,
     CLASS_PROMPTS,
@@ -240,17 +242,54 @@ def run_action(message: str, history: list[Message],
 
 # -- Entrypoint --------------------------------------------------------------
 
+def _save_matches_config(saved: dict[str, Any]) -> bool:
+    """A save is reusable only if its character and class still match env."""
+    state = saved.get("state", {})
+    return (
+        state.get("name") == CHARACTER_NAME
+        and state.get("class") == CHARACTER_CLASS
+    )
+
+
 def main() -> None:
-    game_state = build_game_state()
-    print(game_state["start"])
+    saved = load_save()
+    if saved and _save_matches_config(saved):
+        game_state: dict[str, Any] = saved["state"]
+        initial_history: list[Message] = saved["history"]
+        print(f"[persistence] resumed save with {len(initial_history)} messages")
+    else:
+        game_state = build_game_state()
+        initial_history = [
+            {"role": "assistant", "content": game_state["start"]}
+        ]
+        save_game(game_state, initial_history)
+        print(game_state["start"])
 
     def main_loop(message: str, history: list[Message]) -> str:
         return run_action(message, history, game_state)
 
+    def on_turn(history: list[Message]) -> None:
+        save_game(game_state, history)
+
+    def on_clear() -> list[Message]:
+        """Wipe the save, reset state to class defaults, keep this process's
+        opening. Returns the fresh history to display."""
+        game_state["xp"] = 0
+        game_state["level"] = 1
+        game_state["inventory"] = dict(CLASS_INVENTORIES[CHARACTER_CLASS])
+        fresh_history = [
+            {"role": "assistant", "content": game_state["start"]}
+        ]
+        delete_save()
+        return fresh_history
+
     start_game(
         main_loop,
         opening=game_state["start"],
+        initial_history=initial_history,
         get_state=lambda: game_state,
+        on_turn=on_turn,
+        on_clear=on_clear,
         share=False,
     )
 
