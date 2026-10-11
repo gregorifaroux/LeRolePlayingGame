@@ -1,17 +1,16 @@
 """Gradio chat UI for the role-playing game.
 
-Two-column Blocks layout:
+Three-column Blocks layout:
 
-    [ chatbot                            ] | [ inventory ]
-    [ textbox              ] [ Submit ]   | [           ]
-    [🔄] [↩️] [🗑️]                          | [           ]
-    Examples
-    [ Look around ] [ Continue the story ]
+    [ Lunevraie.png ] |                     🔄 ↩️ 🗑️ | [ character/inventory ]
+    [               ] | [ chatbot                   ] | [                     ]
+    [               ] | [ textbox      ] [ Submit ] | [                     ]
+    [               ] | Look around · Continue      | [                     ]
 
-Retry / Undo / Clear are small icon-only buttons under the input so
-they stay out of the player's way until needed. Light mode is forced
-via a page-load JS redirect to `?__theme=light` because Gradio 6 reads
-the theme mode from the URL query, not from a CSS class.
+Chatbot header (label and share/copy/delete icons) is hidden; Retry /
+Undo / Clear sit above the chatbot where the icons used to be.
+Examples are rendered as compact text-only link buttons under the
+input. Theme follows the browser / OS preference.
 """
 
 from __future__ import annotations
@@ -34,13 +33,59 @@ CLASS_ICONS: dict[str, str] = {
 
 EXAMPLE_ACTIONS = ["Look around", "Continue the story"]
 
-FORCE_LIGHT_JS = """() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('__theme') !== 'light') {
-        url.searchParams.set('__theme', 'light');
-        window.location.replace(url.toString());
-    }
-}"""
+SIDEBAR_CSS = """
+.sidebar-md hr {
+    margin: 0.25rem 0 !important;
+    border: none;
+    border-top: 1px solid var(--border-color-primary, #e5e7eb);
+}
+.sidebar-md h2, .sidebar-md h3 {
+    margin-top: 0.25rem !important;
+    margin-bottom: 0.25rem !important;
+}
+.sidebar-md p {
+    margin: 0.25rem 0 !important;
+}
+.example-link {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+}
+.chat-bare .label-wrap,
+.chat-bare label,
+.chat-bare > .top-panel,
+.chat-bare .icon-button-wrapper,
+.chat-bare button[aria-label*="hare"],
+.chat-bare button[aria-label*="opy"],
+.chat-bare button[aria-label*="elete"],
+.chat-bare button[aria-label*="lear"] {
+    display: none !important;
+}
+.chat-toolbar {
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 0.25rem !important;
+    margin-bottom: -0.5rem !important;
+}
+.chat-toolbar button {
+    padding: 0.25rem 0.5rem !important;
+}
+.example-link button {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--link-text-color, #4f46e5) !important;
+    text-decoration: underline;
+    padding: 0 0.75rem !important;
+    min-width: 0 !important;
+    width: auto !important;
+    white-space: nowrap !important;
+    font-weight: normal !important;
+}
+.example-link button:hover {
+    color: var(--link-text-color-hover, #818cf8) !important;
+}
+"""
 
 
 # Unicode icons for inventory items. Keys are lowercase. Compound item
@@ -97,13 +142,15 @@ def icon_for(name: str) -> str:
 def render_inventory(inventory: dict[str, int]) -> str:
     """Render the inventory as a plain markdown list with icons."""
     if not inventory:
-        return "### Inventory\n\n_Empty_"
-    lines = ["### Inventory", ""]
-    for name, count in inventory.items():
-        # Two trailing spaces + newline gives a soft line break in
-        # Markdown without turning the row into a bullet.
-        lines.append(f"{icon_for(name)} **{name}** × {count}  ")
-    return "\n".join(lines)
+        return f"### Inventory{_HR}_Empty_"
+    items = "\n".join(
+        f"{icon_for(name)} **{name}** × {count}  "
+        for name, count in inventory.items()
+    )
+    return f"### Inventory{_HR}{items}"
+
+
+_HR = '\n\n<hr style="margin:4px 0; border:0; border-top:1px solid #d0d0d0;">\n\n'
 
 
 def render_character(state: dict) -> str:
@@ -113,12 +160,14 @@ def render_character(state: dict) -> str:
     level = state.get("level", 1)
     xp = state.get("xp", 0)
     icon = CLASS_ICONS.get(cls, "✨")
-    header = f"## {name}  \n" if name else ""
+    header = f"## {name}{_HR}" if name else ""
     return (
         header
-        + f"### {icon} {cls}  \n"
+        + f"### {icon} {cls}"
+        + _HR
         + f"**Level** {level}  \n"
         + f"**XP** {xp}"
+        + _HR
     )
 
 
@@ -187,11 +236,30 @@ def start_game(main_loop: MainLoop, opening: str,
 
     with gr.Blocks(title="AI RPG, Lunevraie") as demo:
         with gr.Row():
+            with gr.Column(scale=2):
+                gr.Image(
+                    value="Lunevraie.png",
+                    show_label=False,
+                    container=False,
+                    interactive=False,
+                    buttons=[],
+                )
             with gr.Column(scale=3):
+                with gr.Row(elem_classes=["chat-toolbar"]):
+                    retry_btn = gr.Button(
+                        "🔄 Retry", size="sm", scale=0, min_width=90
+                    )
+                    undo_btn = gr.Button(
+                        "↩️ Undo", size="sm", scale=0, min_width=90
+                    )
+                    clear_btn = gr.Button(
+                        "🗑️ Clear", size="sm", scale=0, min_width=90
+                    )
                 chatbot = gr.Chatbot(
-                    height=400,
-                    label="Chatbot",
+                    height=500,
+                    show_label=False,
                     value=initial_history,
+                    elem_classes=["chat-bare"],
                 )
                 with gr.Row():
                     textbox = gr.Textbox(
@@ -202,24 +270,21 @@ def start_game(main_loop: MainLoop, opening: str,
                     submit_btn = gr.Button(
                         "Submit", variant="primary", scale=1
                     )
-                with gr.Row():
-                    retry_btn = gr.Button(
-                        "🔄 Retry", size="sm", scale=0, min_width=90
-                    )
-                    undo_btn = gr.Button(
-                        "↩️ Undo", size="sm", scale=0, min_width=90
-                    )
-                    clear_btn = gr.Button(
-                        "🗑️ Clear", size="sm", scale=0, min_width=90
-                    )
-                gr.Markdown("### Examples")
                 example_buttons: list[tuple[gr.Button, str]] = []
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     for example in EXAMPLE_ACTIONS:
-                        example_buttons.append((gr.Button(example), example))
-            with gr.Column(scale=1):
+                        example_buttons.append((
+                            gr.Button(
+                                example,
+                                size="sm",
+                                elem_classes=["example-link"],
+                            ),
+                            example,
+                        ))
+            with gr.Column(scale=2):
                 inventory_md = gr.Markdown(
-                    value=render_sidebar(get_state())
+                    value=render_sidebar(get_state()),
+                    elem_classes=["sidebar-md"],
                 )
 
         for btn, example in example_buttons:
@@ -246,6 +311,6 @@ def start_game(main_loop: MainLoop, opening: str,
         share=share,
         server_name="127.0.0.1",
         theme=gr.themes.Origin(),
-        js=FORCE_LIGHT_JS,
+        css=SIDEBAR_CSS,
         allowed_paths=["."],
     )

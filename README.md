@@ -44,10 +44,21 @@ The second line is the Python-3.13 fix:
 ## Run
 
 ```
+./start.sh
+```
+
+`start.sh` activates the venv, boots `ollama serve` if port 11434 is
+cold, pulls any missing model (`qwen2.5:14b`, `llama-guard3:1b`), and
+then runs `game.py`. Pass a different entrypoint to override:
+`./start.sh some_other.py`.
+
+Or run directly:
+
+```
 .venv/bin/python game.py
 ```
 
-The script:
+Either path:
 
 1. Loads the world from `WORLD_FILE`
 2. Asks Ollama to generate the opening scene (slow, 20-60s on 14b)
@@ -60,22 +71,28 @@ and hit Submit (or Enter).
 
 ## UI notes
 
-- Theme: `gr.themes.Origin()`
-- Light mode is forced by redirecting to `?__theme=light` at page load
-  (Gradio 6 reads the mode from the URL query, not from a CSS class)
-- Two-column layout, chat on the left, inventory on the right:
+- Theme: `gr.themes.Origin()`. Follows the browser / OS light/dark
+  preference (no forcing).
+- Three-column layout:
 
 ```
-[ chatbot                            ] | [ inventory ]
-[ Retry ] [ Undo ] [ Clear ]          | [           ]
-[ textbox              ] [ Submit ]   | [           ]
-Examples
-[ Look around ] [ Continue the story ]
+[ Lunevraie.png ] |                     🔄 Retry  ↩️ Undo  🗑️ Clear | [ Alaric Éclair       ]
+[               ] | [ chatbot                                     ] | [ 🪄 Mage              ]
+[               ] | [ textbox                       ] [ Submit ]  | [ Level 1 / XP 0      ]
+[               ] | Look around · Continue the story               | [ Inventory …         ]
 ```
 
-- `Clear` resets the chat back to the opening scene, not an empty chat
-- The right column refreshes after every submit/retry/clear so the
-  inventory stays in sync with the state
+- The left column is a static image (`Lunevraie.png`) that sets the
+  mood.
+- The Chatbot's native header (label, share/copy/delete icons) is
+  hidden. Retry / Undo / Clear sit in that header slot instead, right-
+  aligned above the chat.
+- Examples are compact underlined link-style buttons under the input,
+  not large pills.
+- `Clear` resets the chat back to the opening scene, not an empty
+  chat.
+- The right column (name / class / level / XP / inventory) refreshes
+  after every submit/retry/clear so it stays in sync with state.
 
 ## Safety and moderation
 
@@ -289,13 +306,15 @@ new world files.
 
 ## Files
 
+- `start.sh` — launcher: activates venv, ensures Ollama is up, pulls missing models, runs `game.py`
 - `game.py` — entrypoint: config, chat client, prompts, game state, action loop, `main()`
 - `safety.py` — Llama Guard 3 moderation and refusal policy
 - `inventory.py` — starting inventory, item-change detection, inventory updates
 - `progression.py` — class presets, XP judge, level thresholds
-- `ui.py` — Gradio Blocks layout and launch
+- `ui.py` — Gradio Blocks three-column layout and launch
 - `helper.py` — world load/save (Together API key loader is unused here)
 - `Lunevraie_L1.json` — the world
+- `Lunevraie.png` — left-pane mood art
 - `1. create world/` — notebook that generates new world JSON files (lesson L1)
 - `requirements.txt` — pinned to the lesson's original versions (see Install for the 3.13 fix)
 - `gameintro.png` — screenshot of the opening screen

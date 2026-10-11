@@ -98,34 +98,37 @@ def chat(messages: list[Message], temperature: float = 1.0,
 
 # -- Prompts -----------------------------------------------------------------
 
+_LANGUAGE_RULE = (
+    "LANGUAGE: Write every word in English using the Latin alphabet. "
+    "The only exception is magic: spell names and incantations may be "
+    'in French (e.g. "Lumière de Lune", "Éclat Argenté"). Never use '
+    "Chinese, Japanese, Korean, Cyrillic, or any other script. If you "
+    "notice yourself writing non-Latin characters, stop and rewrite in "
+    "English."
+)
+
 START_SYSTEM_PROMPT = (
     "You are an AI Game master. Your job is to create a start to an "
     "adventure based on the world, kingdom, town and character a player "
     "is playing as.\n"
     "Instructions:\n"
-    "Write all narration in English. The only exception is magic: "
-    "spell names and incantations stay in French (e.g. "
-    '"Lumière de Lune", "Éclat Argenté"). Do not use any other '
-    "language or script.\n"
     "You must only use 2-4 sentences.\n"
     'Write in second person. For example: "You are Jack".\n'
     'Write in present tense. For example "You stand at...".\n'
     "First describe the character and their backstory.\n"
-    "Then describes where they start and what they see around them."
+    "Then describes where they start and what they see around them.\n"
+    + _LANGUAGE_RULE
 )
 
 ACTION_SYSTEM_PROMPT = (
     "You are an AI Game master. Your job is to write what happens next "
     "in a player's adventure game.\n"
     "Instructions:\n"
-    "Write all narration in English. The only exception is magic: "
-    "spell names and incantations stay in French (e.g. "
-    '"Lumière de Lune", "Éclat Argenté"). Do not use any other '
-    "language or script.\n"
     "You must only write 1-3 sentences in response.\n"
     "Always write in second person present tense.\n"
     "Ex. (You look north and see...)\n"
-    "Don't let the player use items they don't have in their inventory."
+    "Don't let the player use items they don't have in their inventory.\n"
+    + _LANGUAGE_RULE
 )
 
 
@@ -153,7 +156,8 @@ def build_game_state() -> dict[str, Any]:
         [
             {"role": "system", "content": START_SYSTEM_PROMPT},
             {"role": "user", "content": world_info + "\nYour Start:"},
-        ]
+        ],
+        temperature=0.7,
     )
     world["start"] = start
     save_world(world, RUN_WORLD_FILE)
@@ -215,7 +219,7 @@ def run_action(message: str, history: list[Message],
         *history,
         {"role": "user", "content": message},
     ]
-    reply = chat(messages)
+    reply = chat(messages, temperature=0.7)
 
     is_safe, categories = moderate(
         guard_history + [{"role": "assistant", "content": reply}]
