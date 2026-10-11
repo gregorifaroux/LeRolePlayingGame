@@ -107,15 +107,18 @@ def render_inventory(inventory: dict[str, int]) -> str:
 
 
 def render_character(state: dict) -> str:
-    """Render the class/level/XP header for the right column."""
+    """Render the name/class/level/XP header for the right column."""
+    name = state.get("name", "")
     cls = state.get("class", "Mage")
     level = state.get("level", 1)
     xp = state.get("xp", 0)
     icon = CLASS_ICONS.get(cls, "✨")
+    header = f"## {name}  \n" if name else ""
     return (
-        f"### {icon} {cls}  \n"
-        f"**Level** {level}  \n"
-        f"**XP** {xp}"
+        header
+        + f"### {icon} {cls}  \n"
+        + f"**Level** {level}  \n"
+        + f"**XP** {xp}"
     )
 
 

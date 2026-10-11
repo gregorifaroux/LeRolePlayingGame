@@ -163,6 +163,7 @@ def build_game_state() -> dict[str, Any]:
         "kingdom": kingdom["description"],
         "town": town["description"],
         "character": character["description"],
+        "name": CHARACTER_NAME,
         "start": start,
         "class": CHARACTER_CLASS,
         "level": 1,
